@@ -1,6 +1,6 @@
 odspdfcrop
 ==========
 
-Splits, renames, and crops PDF files generated from SAS ODS PDF destination.
+Splits, renames, and crops PDF files generated from ODS PDF destination.
+Expects a directory of pdf output files. Changes the files in-place.
 
-Needs work to add command line options and more testing.
