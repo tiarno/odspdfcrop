@@ -1,6 +1,6 @@
 import argparse
-from collections import defaultdict
-from multiprocessing import Process, Queue
+import multiprocessing
+import multiprocessing.forking
 import os
 import re
 import shutil
@@ -22,12 +22,12 @@ def get_filedigit(fdict):
 
 def get_stems(files):
     stems = set()
-    for fname in files:
-        filedigit = re.search(pat, fname)
+    for name in files:
+        filedigit = re.search(pat, name)
         if filedigit:
             stem = filedigit.group(1)
         else:
-            stem = os.path.splitext(fname)[0]
+            stem = os.path.splitext(name)[0]
         stems.add(stem)
     return stems
 
@@ -45,13 +45,18 @@ def get_bbox(ghostscript, filename):
     cmd = '%s -sDEVICE=bbox -dBATCH -dNOPAUSE  -dQUIET %s' % (ghostscript, filename)
     s = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
     s = s[s.rindex('HiResBoundingBox:') + 17:].strip()
-    return s.split()
+    bounds = s.split()
+    if len(bounds) > 4:
+        print '\nERROR for %s:  %s' % (filename, ' '.join(bounds[4:]))
+        bounds = bounds[:4]
+
+    return bounds
 
 def rename_files(source_dir, extstring):
     pdffiles = [x for x in os.listdir(source_dir) if x.endswith(extstring)]
-    for fname in pdffiles:
-        src = os.path.join(source_dir, fname)
-        tgt = os.path.join(source_dir, fname.replace(extstring, '.pdf'))
+    for name in pdffiles:
+        src = os.path.join(source_dir, name)
+        tgt = os.path.join(source_dir, name.replace(extstring, '.pdf'))
         if os.path.isfile(src):
             shutil.copy(src, tgt)
             os.unlink(src)
@@ -67,26 +72,26 @@ class PDFFixer(object):
         print 'Reading %d files' % len(self.pdffiles)
 
         processes = dict()
-        q = Queue()
-        for fname in self.pdffiles:
-            processes[fname] = Process(target=self.read, args=(q, fname))
-            processes[fname].start()
+        q = multiprocessing.Queue()
+        for name in self.pdffiles:
+            processes[name] = multiprocessing.Process(target=self.read, args=(q, name))
+            processes[name].start()
 
         for _ in processes:
             item = q.get()
-            fname, cropped, pages = item['fname'], item['cropped'], item['pages']
-            self.file_info.append({'fname': fname, 'pages': pages})
+            name, cropped, pages = item['name'], item['cropped'], item['pages']
+            self.file_info.append({'name': name, 'pages': pages})
             if cropped:
-                self.cropped.append(fname)
+                self.cropped.append(name)
         print
 
-    def read(self, q, fname):
+    def read(self, q, name):
         print '.',
-        obj = PdfFileReader(open(os.path.join(self.source_dir, fname), 'rb'))
+        obj = PdfFileReader(open(os.path.join(self.source_dir, name), 'rb'))
         docinfo = obj.getDocumentInfo()
         cropped = docinfo and docinfo.has_key('/Cropped')
         pages = obj.getNumPages()
-        q.put({'name': fname, 'cropped': cropped, 'pages':pages})
+        q.put({'name': name, 'cropped': cropped, 'pages':pages})
         obj.stream.close()
 
     def split(self):
@@ -95,8 +100,8 @@ class PDFFixer(object):
             stem_matches = ['%s.pdf' % stem]
             stem_matches.extend([x for x in self.pdffiles if re.match(r'%s\d+\.pdf' % stem, x)])
 
-            stem_info[stem] = [{'fname': x['fname'], 'pages': x['pages']}
-                               for x in self.file_info if x['fname'] in stem_matches]
+            stem_info[stem] = [{'name': x['name'], 'pages': x['pages']}
+                               for x in self.file_info if x['name'] in stem_matches]
 
         for stem in stem_info:
             if sum(x['pages'] for x in stem_info[stem]) == len(stem_info[stem]):
@@ -104,27 +109,30 @@ class PDFFixer(object):
 
             start_splitting = False
             filedigit = 0
-            for pdfdict in sorted(stem_info[stem], key=get_filedigit):
-                fname = pdfdict['fname']
+            files_info = sorted(stem_info[stem], key=get_filedigit)
+
+            for pdfdict in files_info:
+                name = pdfdict['name']
                 pages = pdfdict['pages']
 
                 if not start_splitting and pages > 1:
                     start_splitting = True
                 if not start_splitting:
+                    print 'skipping %s' % name
                     filedigit += 1
                     continue
 
-                print '%30s (%d pages)' % (fname, pages)
-                obj = PdfFileReader(open(os.path.join(self.source_dir, fname), 'rb'))
+                print '%30s (%d pages)' % (name, pages)
+                obj = PdfFileReader(open(os.path.join(self.source_dir, name), 'rb'))
 
                 for pagenum in range(0, pages):
                     if filedigit == 0:
-                        fname = os.path.join(self.source_dir, '%s_SPLIT.pdf' % stem)
+                        name = os.path.join(self.source_dir, '%s_SPLIT.pdf' % stem)
                         rname = '%s.pdf' % stem
                     else:
-                        fname = os.path.join(self.source_dir, '%s%d_SPLIT.pdf' % (stem, filedigit))
+                        name = os.path.join(self.source_dir, '%s%d_SPLIT.pdf' % (stem, filedigit))
                         rname = '%s%d.pdf' % (stem, filedigit)
-                    write_page(fname, obj, pagenum)
+                    write_page(name, obj, pagenum)
 
                     if self.cropped.count(rname):
                         self.cropped.remove(rname)
@@ -143,7 +151,7 @@ class PDFFixer(object):
             print 'Cropping %d files' % len(filenames)
 
         for name in filenames:
-            processes[name] = Process(target=self.crop_process, args=(name,))
+            processes[name] = multiprocessing.Process(target=self.crop_process, args=(name,))
             processes[name].start()
 
         for name in processes:
@@ -176,6 +184,7 @@ def main(args):
     print 'Finished: ', time.clock() - t0, ' processing seconds'
 
 if __name__ == '__main__':
+    multiprocessing.freeze_support()
     parser = argparse.ArgumentParser()
     parser.add_argument('--dir', default=os.path.join(os.getcwd(), 'pdf'))
     parser.add_argument('--nosplit', action='store_true')
