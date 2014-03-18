@@ -124,15 +124,14 @@ class PDFFixer(object):
 
                 print '%30s (%d pages)' % (name, pages)
                 obj = PdfFileReader(open(os.path.join(self.source_dir, name), 'rb'))
-
                 for pagenum in range(0, pages):
                     if filedigit == 0:
-                        name = os.path.join(self.source_dir, '%s_SPLIT.pdf' % stem)
+                        fname = os.path.join(self.source_dir, '%s_SPLIT.pdf' % stem)
                         rname = '%s.pdf' % stem
                     else:
-                        name = os.path.join(self.source_dir, '%s%d_SPLIT.pdf' % (stem, filedigit))
+                        fname = os.path.join(self.source_dir, '%s%d_SPLIT.pdf' % (stem, filedigit))
                         rname = '%s%d.pdf' % (stem, filedigit)
-                    write_page(name, obj, pagenum)
+                    write_page(fname, obj, pagenum)
 
                     if self.cropped.count(rname):
                         self.cropped.remove(rname)
@@ -165,14 +164,19 @@ class PDFFixer(object):
 
         print '+',
         lx, ly, ux, uy = get_bbox(self.ghostscript, fullname)
-        page = obj.getPage(0)
-        page.mediaBox.lowerLeft = lx, ly
-        page.mediaBox.lowerRight = ux, ly
-        page.mediaBox.upperLeft = lx, uy
-        page.mediaBox.upperRight = ux, uy
+        try:
+            map(float, (lx, ly, ux, uy))
+        except ValueError as e:
+            print '%s\nSkipping %s: Bad bounding box' % (e, name)
+        else:
+            page = obj.getPage(0)
+            page.mediaBox.lowerLeft = lx, ly
+            page.mediaBox.lowerRight = ux, ly
+            page.mediaBox.upperLeft = lx, uy
+            page.mediaBox.upperRight = ux, uy
 
-        new_name = os.path.join(self.source_dir, '%s_CROP.pdf' % os.path.splitext(name)[0])
-        write_page(new_name, obj, 0, crop=True)
+            new_name = os.path.join(self.source_dir, '%s_CROP.pdf' % os.path.splitext(name)[0])
+            write_page(new_name, obj, 0, crop=True)
 
 def main(args):
     t0 = time.clock()
