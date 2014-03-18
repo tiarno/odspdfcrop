@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 
 from pyPdf import PdfFileReader, PdfFileWriter
@@ -49,6 +50,12 @@ def get_bbox(ghostscript, filename):
     if len(bounds) > 4:
         print '\nERROR for %s:  %s' % (filename, ' '.join(bounds[4:]))
         bounds = bounds[:4]
+
+    try:
+        map(float, bounds)
+    except ValueError as e:
+        print '%s\nSkipping %s: Bad bounding box' % (e, filename)
+        bounds = None
 
     return bounds
 
@@ -163,12 +170,10 @@ class PDFFixer(object):
         obj = PdfFileReader(open(fullname, 'rb'))
 
         print '+',
-        lx, ly, ux, uy = get_bbox(self.ghostscript, fullname)
-        try:
-            map(float, (lx, ly, ux, uy))
-        except ValueError as e:
-            print '%s\nSkipping %s: Bad bounding box' % (e, name)
-        else:
+        bounds = get_bbox(self.ghostscript, fullname)
+        if bounds:
+            lx, ly, ux, uy = bounds
+
             page = obj.getPage(0)
             page.mediaBox.lowerLeft = lx, ly
             page.mediaBox.lowerRight = ux, ly
@@ -188,7 +193,8 @@ def main(args):
     print 'Finished: ', time.clock() - t0, ' processing seconds'
 
 if __name__ == '__main__':
-    multiprocessing.freeze_support()
+    if sys.platform.startswith('win'):
+        multiprocessing.freeze_support()
     parser = argparse.ArgumentParser()
     parser.add_argument('--dir', default=os.path.join(os.getcwd(), 'pdf'))
     parser.add_argument('--nosplit', action='store_true')
