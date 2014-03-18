@@ -46,16 +46,16 @@ def get_bbox(ghostscript, filename):
     cmd = '%s -sDEVICE=bbox -dBATCH -dNOPAUSE  -dQUIET %s' % (ghostscript, filename)
     s = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
     s = s[s.rindex('HiResBoundingBox:') + 17:].strip()
-    bounds = s.split()
-    if len(bounds) > 4:
-        print '\nERROR for %s:  %s' % (filename, ' '.join(bounds[4:]))
-        bounds = bounds[:4]
+    str_bounds = s.split()
 
+    if len(str_bounds) > 4:
+        print '\nERROR for %s:  %s' % (filename, ' '.join(str_bounds[4:]))
+        str_bounds = str_bounds[:4]
     try:
-        map(float, bounds)
+        bounds = map(float, str_bounds)
     except ValueError as e:
         print '%s\nSkipping %s: Bad bounding box' % (e, filename)
-        bounds = None
+        bounds = list()
 
     return bounds
 
@@ -171,7 +171,7 @@ class PDFFixer(object):
 
         print '+',
         bounds = get_bbox(self.ghostscript, fullname)
-        if bounds:
+        if bounds and int(sum(bounds)):
             lx, ly, ux, uy = bounds
 
             page = obj.getPage(0)
