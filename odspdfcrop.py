@@ -1,3 +1,19 @@
+"""
+:platform: Unix, Windows
+:synopsis: Given a directory of numbered PDF files,
+           optionally split them into one-page PDFs while retaining the
+           numeric order, and crop white space on all sides of each PDF.
+
+:requirements: pyPdf package and access to Ghostscript executable (for finding the bounding box)
+
+:assumption: The original PDF files contain information in an ordered stream,
+             and named according to the following pattern::
+
+                 somefile.pdf somefile1.pdf somefile2.pdf somefile3.pdf and so on
+
+.. moduleauthor:: Tim Arnold <jtim.arnold@gmail.com>
+"""
+
 import argparse
 import multiprocessing
 import multiprocessing.forking
@@ -14,6 +30,20 @@ from pyPdf.generic import NameObject, createStringObject
 pat = re.compile(r'([\w_\d]+?)(\d+)\.pdf')
 
 def get_filedigit(fdict):
+    ''' Returns the number at the end of a file-stem.
+
+        Used as sort-key function to sort a list of dictionaries
+
+        Args:
+          fdict: a dictionary of file information
+
+        Returns:
+          number at the end of the file-stem
+
+        Example:
+          fdict = {'name': 'one12.pdf', }
+          digit = 12
+    '''
     matched = re.search(pat, fdict['name'])
     if matched:
         digit = int(matched.group(2))
@@ -22,6 +52,22 @@ def get_filedigit(fdict):
     return digit
 
 def get_stems(files):
+    ''' Returns a list of file-stems from a list of file names.
+
+        Used to organize files by stem name.
+
+        Args:
+          list of complete file names
+
+        Returns:
+          list of file stems computed from complete names
+
+        Example::
+
+          files = ['one.pdf', 'one1.pdf, 'one2.pdf',
+                   'two.pdf', 'two1.pdf']
+          stems = ['one', 'two']
+    '''
     stems = set()
     for name in files:
         filedigit = re.search(pat, name)
@@ -33,6 +79,22 @@ def get_stems(files):
     return stems
 
 def write_page(filename, obj, pagenum, crop=False):
+    '''Write a PDF object to disk.
+
+        Args:
+          :filename: the file to create
+          :obj: the PDF object in memory
+          :pagenum: the page in the PDF to write
+          :crop: flag indicating whether the function is
+                 called from the cropping process
+
+        Used for splitting pdfs by page and writing cropped objects
+        to disk. If called from the cropping process, add metadata to
+        the PDF so we don't try to split or crop it in some subsequent run.
+
+        Returns: None
+
+    '''
     p = PdfFileWriter()
     if crop:
         infoDict = p._info.getObject()
@@ -43,6 +105,17 @@ def write_page(filename, obj, pagenum, crop=False):
     p.write(open(filename, 'wb'))
 
 def get_bbox(ghostscript, filename):
+    '''Get the Bounding Box of a page from a PDF file, using Ghostscript
+
+        Args:
+          :ghostscript: the full path to the Ghostscript executable
+          :filename: the name of the PDF file to query for the bounding box.
+
+        Used to crop a PDF object
+
+        Returns:
+          :bounds: a 4-element list of floats representing the bounding box.
+    '''
     cmd = '%s -sDEVICE=bbox -dBATCH -dNOPAUSE  -dQUIET %s' % (ghostscript, filename)
     s = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
     s = s[s.rindex('HiResBoundingBox:') + 17:].strip()
@@ -60,6 +133,18 @@ def get_bbox(ghostscript, filename):
     return bounds
 
 def rename_files(source_dir, extstring):
+    '''Rename files in a directory by removing a string from the name.
+
+        Writing files to disk is faster than passing around open PDF object
+        streams. The files are written with a _CROP or _SPLIT flag in the name.
+        This function removes the flag, resulting in overwriting the original PDF file.
+
+        Args:
+          :source_dir: the directory of files
+          :extstring: the string to remove from each name
+
+        Returns: None
+    '''
     pdffiles = [x for x in os.listdir(source_dir) if x.endswith(extstring)]
     for name in pdffiles:
         src = os.path.join(source_dir, name)
@@ -69,6 +154,21 @@ def rename_files(source_dir, extstring):
             os.unlink(src)
 
 class PDFFixer(object):
+    '''Class to (optionally split, re-number, and) crop a directory of PDF files.
+
+        There are three stages to the process:
+
+          1. Initialize. Read the files in the directory using multiple processes.
+             Record the PDF's filename, the number of pages it contains, and a
+             boolean indicating if it has been cropped. Close the files.
+
+          2. Split and renumber the PDFs. In a set of multiple processes,
+             split any PDFs that contain multiple pages into separate files.
+             Then re-number the PDF files such that the information contained
+             in the original stream is kept it the original order.
+
+          3. Crop the whitespace from the margins of each PDF.
+        '''
     def __init__(self, args):
         self.source_dir = args.dir
         self.ghostscript = args.ghostscript
@@ -93,6 +193,11 @@ class PDFFixer(object):
         print
 
     def read(self, q, name):
+        '''Read a PDF file, find the number of pages it contains and whether
+           it contains metadata indicating it has been cropped in a previous
+           run. Save the information and place it in a queue that is used after
+           all processes have completed.
+        '''
         print '.',
         obj = PdfFileReader(open(os.path.join(self.source_dir, name), 'rb'))
         docinfo = obj.getDocumentInfo()
@@ -102,8 +207,24 @@ class PDFFixer(object):
         obj.stream.close()
 
     def split(self):
+        '''Create a data structure, `stem_info`, which contains an ordered list
+           of the files that match to each file-stem.
+
+           Process each list of files by file-stem. If no pdf files in the list
+           have multiple pages, this method does nothing.
+
+           If multiple pages do exist for at least one file in the list, split the
+           files from that point on so that each pdf file contains one page.
+           Then write the pages to files, renumbering so the information stream
+           keeps its original order.
+
+           Rename the files so the original files are overwritten after all processes
+           are complete.
+
+        '''
         stem_info = dict()
         for stem in get_stems(self.pdffiles):
+            'Create the data structure to match a list of files according to its stem'
             stem_matches = ['%s.pdf' % stem]
             stem_matches.extend([x for x in self.pdffiles if re.match(r'%s\d+\.pdf' % stem, x)])
 
@@ -111,6 +232,7 @@ class PDFFixer(object):
                                for x in self.file_info if x['name'] in stem_matches]
 
         for stem in stem_info:
+            'if no file in the list contains multiple pages, do nothing'
             if sum(x['pages'] for x in stem_info[stem]) == len(stem_info[stem]):
                 continue
 
@@ -130,6 +252,9 @@ class PDFFixer(object):
                     continue
 
                 print '%30s (%d pages)' % (name, pages)
+                '''Write a new one-page file for each page in the stream
+                   naming the files consecutively.
+                '''
                 obj = PdfFileReader(open(os.path.join(self.source_dir, name), 'rb'))
                 for pagenum in range(0, pages):
                     if filedigit == 0:
@@ -150,6 +275,10 @@ class PDFFixer(object):
 
 
     def crop(self):
+        '''For each file in the directory, start a subprocess (within multiprocess)
+           to crop the file. Rename the files to overwrite the original when all
+           processes are complete.
+        '''
         processes = dict()
         filenames = [x for x in os.listdir(self.source_dir)
                      if x not in self.cropped and x.endswith('.pdf')]
@@ -166,6 +295,9 @@ class PDFFixer(object):
         rename_files(self.source_dir, '_CROP.pdf')
 
     def crop_process(self, name):
+        '''Get the bounding box for each file and set the new dimensions
+           on the page object. Write the page object to disk.
+        '''
         fullname = os.path.join(self.source_dir, name)
         obj = PdfFileReader(open(fullname, 'rb'))
 
@@ -193,6 +325,22 @@ def main(args):
     print 'Finished: ', time.clock() - t0, ' processing seconds'
 
 if __name__ == '__main__':
+    '''Set up command line arguments
+
+        If you use pyinstaller to create an executable, you must include
+        `multiprocessing.freeze_support` on the Windows platform.
+
+        Arguments:
+          :--dir: Specify the directory containing the PDF files.
+                  The default is a directory `pdf` directly under the
+                  current working directory.
+
+          :--nosplit: Omit the splitting and re-numbering process.
+                      Use this if you want only to crop the PDF files.
+
+          :--ghostscript: Specify the full path to the Ghostscript executable
+
+    '''
     if sys.platform.startswith('win'):
         multiprocessing.freeze_support()
     parser = argparse.ArgumentParser()
