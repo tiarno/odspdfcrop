@@ -5,10 +5,14 @@ Synopsis: Given a directory of numbered PDF files,
           optionally split them into one-page PDFs while retaining the
           numeric order, and crop white space on all sides of each PDF.
           Changes the files in-place.
+          
+          Can be used generically, to (optionally burst and) crop any directory of pdf files.
+          
+          Comments in code.
 
 Platform: Unix, Windows
 
-Eequirements: Python 2.7, pyPdf package, and access to Ghostscript executable (for finding the bounding box)
+Requirements: Python 2.7, pyPdf package, and access to Ghostscript executable (for finding the bounding box)
 
 Assumption: The original PDF files contain information in an ordered stream,
              and named according to the following pattern::
