@@ -12,7 +12,8 @@ Can also be used generically, to (optionally burst and) crop any directory of pd
 
 Comments in code.
 
-**Requirements**: Python 2.7, pyPdf package, and access to Ghostscript executable (for finding the bounding box)
+**Requirements**: Python 2.7, either the pyPdf or the PyPDF2 package, 
+                  and access to Ghostscript executable (for finding the bounding box)
 
 **Assumption**: The original PDF files contain information in an ordered stream,
                 and named according to the following pattern::
