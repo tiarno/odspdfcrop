@@ -24,8 +24,11 @@ import subprocess
 import sys
 import time
 
-from pyPdf import PdfFileReader, PdfFileWriter
-from pyPdf.generic import NameObject, createStringObject
+'Attempt to use pyPdf; use PyPDF2 if that fails'
+try:
+    import pyPdf
+except ImportError:
+    import PyPDF2 as pyPdf
 
 pat = re.compile(r'([\w_\d]+?)(\d+)\.pdf')
 
@@ -95,10 +98,11 @@ def write_page(filename, obj, pagenum, crop=False):
         Returns: None
 
     '''
-    p = PdfFileWriter()
+    p = pyPdf.PdfFileWriter()
     if crop:
         infoDict = p._info.getObject()
-        infoDict.update({NameObject('/Cropped'): createStringObject(u'True')})
+        infoDict.update({pyPdf.generic.NameObject('/Cropped'):
+                         pyPdf.generic.createStringObject(u'True')})
 
     page = obj.getPage(pagenum)
     p.addPage(page)
@@ -199,7 +203,7 @@ class PDFFixer(object):
            all processes have completed.
         '''
         print '.',
-        obj = PdfFileReader(open(os.path.join(self.source_dir, name), 'rb'))
+        obj = pyPdf.PdfFileReader(open(os.path.join(self.source_dir, name), 'rb'))
         docinfo = obj.getDocumentInfo()
         cropped = docinfo and docinfo.has_key('/Cropped')
         pages = obj.getNumPages()
@@ -255,7 +259,7 @@ class PDFFixer(object):
                 '''Write a new one-page file for each page in the stream
                    naming the files consecutively.
                 '''
-                obj = PdfFileReader(open(os.path.join(self.source_dir, name), 'rb'))
+                obj = pyPdf.PdfFileReader(open(os.path.join(self.source_dir, name), 'rb'))
                 for pagenum in range(0, pages):
                     if filedigit == 0:
                         fname = os.path.join(self.source_dir, '%s_SPLIT.pdf' % stem)
@@ -299,7 +303,7 @@ class PDFFixer(object):
            on the page object. Write the page object to disk.
         '''
         fullname = os.path.join(self.source_dir, name)
-        obj = PdfFileReader(open(fullname, 'rb'))
+        obj = pyPdf.PdfFileReader(open(fullname, 'rb'))
 
         print '+',
         bounds = get_bbox(self.ghostscript, fullname)
