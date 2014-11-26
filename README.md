@@ -30,3 +30,11 @@ Comments in code.
                     Use this if you want only to crop the PDF files.
 
           --ghostscript Specify the full path to the Ghostscript executable
+
+```sas
+data one;
+set sashelp.class;
+proc reg;
+model weight=height;
+run;
+```
